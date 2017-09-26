@@ -41,9 +41,9 @@ parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=32, type=int,
+parser.add_argument('-b', '--batch_size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning_rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -130,7 +130,7 @@ def main():
         adjust_learning_rate(optimizer, epoch)
 
         # train for one epoch
-        train(train_data_x, train_data_y, model, criterion, optimizer, epoch, transform)
+        train(train_data_x, train_data_y, model, criterion, optimizer, epoch, transform, batch_size)
 
         # evaluate on validation set
         prec1 = validate(valid_data_x, valid_data_y, model, criterion)
@@ -147,7 +147,7 @@ def main():
         }, is_best)
 
 
-def train(x, y, model, criterion, optimizer, epoch, transform):
+def train(x, y, model, criterion, optimizer, epoch, transform, batch_size):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -160,11 +160,12 @@ def train(x, y, model, criterion, optimizer, epoch, transform):
     model.train()
 
     end = time.time()
-    for i in ix_shuffle:
+    for bix in range(int(len(ix_shuffle)/batch_size)):
         #import pdb
         #pdb.set_trace()
-        input = transform(x[i]).view([1,x.size(1),x.size(2),x.size(3)])
-        target = y[i:i+1]
+        i = ix_shuffle[bix*batch_size:(bix+1)*batch_size]
+        input = transform(x[torch.LongTensor(i),:,:,:]).view([1,x.size(1),x.size(2),x.size(3)])
+        target = y[i]
         # measure data loading time
         data_time.update(time.time() - end)
         target = target.cuda(async=True)
@@ -190,14 +191,14 @@ def train(x, y, model, criterion, optimizer, epoch, transform):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
+        if bix % args.print_freq == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                   epoch, i, len(x), batch_time=batch_time,
+                   epoch, bix, len(x), batch_time=batch_time,
                    data_time=data_time, loss=losses, top1=top1, top5=top5))
 
 
