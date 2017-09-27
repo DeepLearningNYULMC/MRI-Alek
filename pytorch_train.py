@@ -18,7 +18,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import torchvision.models as models
+import models as models
 
 import matplotlib.pyplot as plt
 
@@ -38,7 +38,7 @@ def main(argv, best_prec1=0):
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](num_classes=3)
+        model = models.__dict__[args.arch](num_classes=3, num_channels=3)
 
     if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
         model.features = torch.nn.DataParallel(model.features)
