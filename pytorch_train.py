@@ -23,47 +23,9 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('--train_x_pkl',
-                    help='path to dataset pickle file train x')
-parser.add_argument('--valid_x_pkl',
-                    help='path to dataset pickle file valid x')
-parser.add_argument('--train_y_pkl',
-                    help='path to dataset pickle file train y ')
-parser.add_argument('--valid_y_pkl',
-                    help='path to dataset pickle file valid y')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='alexnet',
-                    choices=model_names,
-                    help='model architecture: ' +
-                        ' | '.join(model_names) +
-                        ' (default: resnet18)')
-parser.add_argument('--epochs', default=90, type=int, metavar='N',
-                    help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch_size', default=32, type=int,
-                    metavar='N', help='mini-batch size (default: 256)')
-parser.add_argument('--lr', '--learning_rate', default=0.01, type=float,
-                    metavar='LR', help='initial learning rate')
-parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
-                    help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)')
-parser.add_argument('--print-freq', '-p', default=10, type=int,
-                    metavar='N', help='print frequency (default: 10)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
-parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
-                    help='evaluate model on validation set')
-parser.add_argument('--pretrained', dest='pretrained', action='store_true', default=False,
-                    help='use pre-trained model')
 
-best_prec1 = 0
-
-
-def main():
-    global args, best_prec1
-    args = parser.parse_args()
+def main(argv, best_prec1=0):
+    args = get_args(argv)
 
     # create model
     if args.pretrained:
@@ -115,10 +77,10 @@ def main():
     except:
        print('problem loading pickles')
        raise
-
-    transform = transforms.Compose([transforms.ToPILImage(),
-                                    transforms.ToTensor(),
-                                    transforms.Normalize((0.1307,0.1307,0.1307), (0.1307,0.1307,0.1307))])
+    transform = None
+    #transform = transforms.Compose([transforms.ToPILImage(),
+    #                                transforms.ToTensor(),
+    #                                transforms.Normalize( (0.1307,0.1307,0.1307), (0.1307,0.1307,0.1307))])
 
     batch_size=args.batch_size
 
@@ -127,13 +89,13 @@ def main():
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-        adjust_learning_rate(optimizer, epoch)
+        adjust_learning_rate(optimizer, epoch, args)
 
         # train for one epoch
-        train(train_data_x, train_data_y, model, criterion, optimizer, epoch, transform, batch_size)
+        train(train_data_x, train_data_y, model, criterion, optimizer, epoch, transform, batch_size, args)
 
         # evaluate on validation set
-        prec1 = validate(valid_data_x, valid_data_y, model, criterion)
+        prec1 = validate(valid_data_x, valid_data_y, model, criterion, args)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -147,7 +109,7 @@ def main():
         }, is_best)
 
 
-def train(x, y, model, criterion, optimizer, epoch, transform, batch_size):
+def train(x, y, model, criterion, optimizer, epoch, transform, batch_size, args):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -164,8 +126,8 @@ def train(x, y, model, criterion, optimizer, epoch, transform, batch_size):
         #import pdb
         #pdb.set_trace()
         i = ix_shuffle[bix*batch_size:(bix+1)*batch_size]
-        input = transform(x[torch.LongTensor(i),:,:,:]).view([1,x.size(1),x.size(2),x.size(3)])
-        target = y[i]
+        input = torch.from_numpy(x[i,:,:,:]).float() #).view([len(i),x.size(1),x.size(2),x.size(3)])
+        target = torch.from_numpy(y[i]).type(torch.LongTensor)
         # measure data loading time
         data_time.update(time.time() - end)
         target = target.cuda(async=True)
@@ -202,7 +164,9 @@ def train(x, y, model, criterion, optimizer, epoch, transform, batch_size):
                    data_time=data_time, loss=losses, top1=top1, top5=top5))
 
 
-def validate(x, y, model, criterion):
+def validate(x, y, model, criterion, args):
+    y = torch.from_numpy(y).type(torch.LongTensor)
+    x = torch.from_numpy(x).float()
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -271,7 +235,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def adjust_learning_rate(optimizer, epoch):
+def adjust_learning_rate(optimizer, epoch, args):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     lr = args.lr * (0.1 ** (epoch // 30))
     for param_group in optimizer.param_groups:
@@ -299,15 +263,53 @@ def load_pickle(fname, isx=False):
     if isx == True:
         raw = raw.reshape(raw.shape[0], 256, 256)
         raw = np.stack([raw, raw, raw], axis=1)
+        return raw
         tensor_out = torch.from_numpy(raw).float()
     else:
         raw = np.argmax(raw, axis=1)
         #print(raw.shape)
+        return raw
         tensor_out = torch.from_numpy(raw).type(torch.LongTensor)
     return tensor_out
 
+def get_args(argv):
+    parser = argparse.ArgumentParser(description='PyTorch Convnet Training')
+    parser.add_argument('--train_x_pkl',
+                        help='path to dataset pickle file train x')
+    parser.add_argument('--valid_x_pkl', 
+                        help='path to dataset pickle file valid x')
+    parser.add_argument('--train_y_pkl',
+                        help='path to dataset pickle file train y ')
+    parser.add_argument('--valid_y_pkl',
+                        help='path to dataset pickle file valid y')
+    parser.add_argument('--arch', '-a', metavar='ARCH', default='alexnet',
+                        choices=model_names,
+                        help='model architecture: ' +
+                            ' | '.join(model_names) +
+                            ' (default: resnet18)')
+    parser.add_argument('--epochs', default=90, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
+    parser.add_argument('-b', '--batch_size', default=32, type=int,
+                        metavar='N', help='mini-batch size (default: 256)')
+    parser.add_argument('--lr', '--learning_rate', default=0.01, type=float,
+                        metavar='LR', help='initial learning rate')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+                        help='momentum')
+    parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
+                        metavar='W', help='weight decay (default: 1e-4)')
+    parser.add_argument('--print-freq', '-p', default=10, type=int,
+                        metavar='N', help='print frequency (default: 10)')
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', default=False,
+                        help='evaluate model on validation set')
+    parser.add_argument('--pretrained', dest='pretrained', action='store_true', default=False,
+                        help='use pre-trained model')
+    return parser.parse_args(argv)
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv)
 
 
