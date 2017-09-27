@@ -30,7 +30,7 @@ def main(argv, best_prec1=0):
     args = get_args(argv)
 
     #os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_id
+    #os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_id
     
     # create model
     if args.pretrained:
