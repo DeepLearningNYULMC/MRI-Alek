@@ -51,11 +51,10 @@ def main(argv, best_prec1=0):
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
-    print('=> changing the model to have single channel and 3 outcomes')
-
+    optimizer = torch.optim.SGD(model.parameters(), args.lr
+                                ,momentum=args.momentum,
+                                weight_decay=args.weight_decay
+                                   )
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -239,7 +238,7 @@ def validate(xnumpy, ynumpy, ids, model, criterion, batch_size, args, doplot):
         end = time.time()
 
         if bix % args.print_freq == 0:
-            print('   Valid: [{0}/{1}]  '
+            print('   Epoch-Valid: [{0}/{1}]  '
                   #'Time {batch_time.val:.3f} ({batch_time.avg:.3f})  '
                   'Loss {loss.val:.4f} ({loss.avg:.4f})  '
                   'Acc {accu.val:.3f} ({accu.avg:.3f})'.format(
@@ -277,7 +276,7 @@ def numpy_evaluate(x, pred, y, outs, ids, doplot=False, tag=''):
                 axarray[i,j].imshow(x[ix_orig].reshape(256,256))
                 axarray[i,j].set_title('{0}/{1}:{2}'.format(y[ix_orig], pred[ix_orig], ids[ix_orig]), size=8)
         plt.show()
-    for class_id in range(max(y)):
+    for class_id in range(max(y)+1):
         print('    ----------------------------------     ')
         print('    |class =', class_id)
         class_ix = (y == class_id)
