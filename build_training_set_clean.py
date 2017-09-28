@@ -28,7 +28,7 @@ for modality_type in modality_type_list:
     print('dataset group:', dataset_type)
     x1 = np.zeros((1,256*256), dtype=float)
     y1 = np.zeros((1,3), dtype=int)
-    ids_1 = []
+    ids_1 = ['dummy']
     num_of_pts = 0
     for root, dirs, filenames in os.walk(root_dir+'/'+modality_type+"_training/"+dataset_type):
         for f in filenames:
@@ -62,7 +62,7 @@ for modality_type in modality_type_list:
                 yy = misc.imresize(data[:,:,p], size=(256,256), interp = 'nearest')
                 data_resized_slices_x[p,:] = numpy.asarray(yy).reshape(1,256*256)
                 data_resized_slices_y[p, patient_type] = 1
-                ids_1.append(row)
+                ids_1.append(patient_name)
                 num_of_pts = num_of_pts + 1
             x1 = np.vstack([x1, data_resized_slices_x])
             y1 = np.vstack([y1, data_resized_slices_y])
