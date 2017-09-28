@@ -21,6 +21,8 @@ import torchvision.datasets as datasets
 import models as models
 
 import matplotlib.pyplot as plt
+from sklearn import metrics
+from scipy.ndimage import binary_fill_holes
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -38,7 +40,7 @@ def main(argv, best_prec1=0):
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](num_classes=3, num_channels=3)
+        model = models.__dict__[args.arch](num_classes=3, num_channels=1)
 
     if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
         model.features = torch.nn.DataParallel(model.features)
@@ -70,38 +72,60 @@ def main(argv, best_prec1=0):
 
     cudnn.benchmark = True
 
-#    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-#                                     std=[0.229, 0.224, 0.225])
     try:
-       train_data_x, good_ix_train = load_pickle(args.train_x_pkl, isx=True, good_ix=None)
-       train_data_y,_ = load_pickle(args.train_y_pkl, isx=False, good_ix=good_ix_train)
-       valid_data_x, good_ix_valid = load_pickle(args.valid_x_pkl, isx=True, good_ix=None)
-       valid_data_y,_ = load_pickle(args.valid_y_pkl, isx=False, good_ix=good_ix_valid)
-       print('=> loading data done. train shape:', train_data_x.shape, ' valid shape', valid_data_x.shape)
-
+        if args.evaluate == False:
+            train_data_x, good_ix_train = load_pickle(args.train_x_pkl, isx=True, good_ix=None)
+            train_data_y,_ = load_pickle(args.train_y_pkl, isx=False, good_ix=good_ix_train)
+            train_data_ids,_ = load_pickle(args.train_id_pkl, isx=False, good_ix=good_ix_train, isIDs=True)
+            print('=> loading data done. train shape:', train_data_x.shape)
+            
+            valid_data_x, good_ix_valid = load_pickle(args.valid_x_pkl, isx=True, good_ix=None)
+            valid_data_y,_ = load_pickle(args.valid_y_pkl, isx=False, good_ix=good_ix_valid)
+            valid_data_ids,_ = load_pickle(args.valid_id_pkl, isx=False, good_ix=good_ix_valid, isIDs=True)
+            print('=> loading data done. valid shape:', train_data_x.shape)
+        else:
+            test_data_x, good_ix_test = load_pickle(args.test_x_pkl, isx=True, good_ix=None)
+            test_data_y,_ = load_pickle(args.test_y_pkl, isx=False, good_ix=good_ix_test)
+            test_data_ids,_ = load_pickle(args.test_id_pkl, isx=False, good_ix=good_ix_test, isIDs=True)
+            print('=> loading data done. test shape:', train_data_x.shape)
+        
+        if False: #i.e. right now all models supposedly handle single channel but to be checked later.
+            train_data_x = make_3_channel(train_data_x)
+            valid_data_x = make_3_channel(valid_data_x)
     except:
-       print('problem loading pickles')
-       raise
+        print('problem loading pickles')
+        raise
+        
     transform = None
-    #transform = transforms.Compose([transforms.ToPILImage(),
-    #                                transforms.ToTensor(),
-    #                                transforms.Normalize( (0.1307,0.1307,0.1307), (0.1307,0.1307,0.1307))])
-
     batch_size=args.batch_size
 
     if args.evaluate:
-        validate(valid_data_x, valid_data_y, model, criterion)
+        validate(test_data_x, test_data_y, 0 , model, criterion, args, True)
         return
 
+    train_loss_list = []
+    valid_loss_list = []
     for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(optimizer, epoch, args)
+        
+        doplot = True if ((epoch %10 == 0) and (epoch > 0)) else False
 
         # train for one epoch
-        train(train_data_x, train_data_y, model, criterion, optimizer, epoch, transform, batch_size, args)
+        trainloss = train(train_data_x, train_data_y, train_data_ids , model, criterion, 
+              optimizer, epoch, transform, batch_size, args, doplot)
+        train_loss_list.append(trainloss)
 
         # evaluate on validation set
-        prec1 = validate(valid_data_x, valid_data_y, model, criterion, args)
+        prec1 = validate(valid_data_x, valid_data_y, valid_data_ids , model, 
+                         criterion, batch_size, args, doplot)
 
+        valid_loss_list.append(prec1)
+        plt.figure()
+        plt.plot(valid_loss_list, label='validation loss')
+        plt.plot(train_loss_list, label='train loss')
+        plt.legend()
+        plt.show()
+        
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
@@ -113,13 +137,15 @@ def main(argv, best_prec1=0):
             'optimizer' : optimizer.state_dict(),
         }, is_best, args.save_fname)
 
-
-def train(x, y, model, criterion, optimizer, epoch, transform, batch_size, args):
+def train(x, y, ids, model, criterion, optimizer, epoch, transform, batch_size, args, doplot):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     accuracies = AverageMeter()
-
+    preds = np.zeros(len(y))
+    outs = np.zeros((len(y), 3))
+    
+    #reshuffle the training data 
     ix_shuffle = list(np.arange(0, len(x)))
     np.random.shuffle(ix_shuffle)
     # switch to train mode
@@ -130,6 +156,7 @@ def train(x, y, model, criterion, optimizer, epoch, transform, batch_size, args)
         i = ix_shuffle[bix*batch_size:(bix+1)*batch_size]
         input = torch.from_numpy(x[i,:,:,:]).float()
         target = torch.from_numpy(y[i]).type(torch.LongTensor)
+        
         # measure data loading time
         data_time.update(time.time() - end)
         target = target.cuda(async=True)
@@ -138,6 +165,9 @@ def train(x, y, model, criterion, optimizer, epoch, transform, batch_size, args)
 
         # compute output
         output = model(input_var)
+        _, preds_i = (output.data.topk(1, 1, True, True))
+        outs[i,:] = output.data.cpu().numpy()
+        preds[i] = preds_i.cpu().numpy()
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
@@ -155,18 +185,24 @@ def train(x, y, model, criterion, optimizer, epoch, transform, batch_size, args)
         end = time.time()
 
         if bix % (int(args.print_freq/batch_size)) == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+            print('   Epoch: [{0}][{1}/{2}]  '
+                  #'Time {batch_time.val:.3f} ({batch_time.avg:.3f})  '
+                  #'Data {data_time.val:.3f} ({data_time.avg:.3f})  '
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})  '
                   'Acc {accu.val:.3f} ({accu.avg:.3f})'.format(
                    epoch, bix, (len(x)/batch_size), batch_time=batch_time,
                    data_time=data_time, loss=losses, accu=accuracies))
+    acc, auc, acc_list, auc_list = numpy_evaluate(x, preds, y, outs, ids, doplot, 'train')
+    print('*   Train acc:{0:.3f}, acc_C0:{2:.3f}, acc_C1:{4:.3f}, acc_C2:{6:.3f}'.format(acc, auc, acc_list[0], auc_list[0], acc_list[1], auc_list[1], acc_list[2], auc_list[2]))
+    return losses.avg
 
 
-def validate(x, y, model, criterion, args):
-    y = torch.from_numpy(y).type(torch.LongTensor)
-    x = torch.from_numpy(x).float()
+def validate(xnumpy, ynumpy, ids, model, criterion, batch_size, args, doplot):
+    #y = torch.from_numpy(ynumpy).type(torch.LongTensor)
+    #x = torch.from_numpy(xnumpy).float()
+    preds = np.zeros(len(ynumpy))
+    outs = np.zeros((len(ynumpy), 3))
+
     batch_time = AverageMeter()
     losses = AverageMeter()
     accuracies = AverageMeter()
@@ -175,15 +211,22 @@ def validate(x, y, model, criterion, args):
     model.eval()
 
     end = time.time()
-    for i in range(len(x)):
-        input = x[i:i+1]
-        target = y[i:i+1]
+    ix_all = range(0,len(ynumpy))
+    for bix in range(int(len(ynumpy)/batch_size)):
+        i = ix_all[bix*batch_size:(bix+1)*batch_size]
+        input = torch.from_numpy(xnumpy[i,:,:,:]).float()
+        target = torch.from_numpy(ynumpy[i]).type(torch.LongTensor)
+        #input = x[i:i+1]
+        #target = y[i:i+1]
         target = target.cuda(async=True)
         input_var = torch.autograd.Variable(input, volatile=True)
         target_var = torch.autograd.Variable(target, volatile=True)
 
         # compute output
         output = model(input_var)
+        _, preds_i = output.data.topk(1, 1, True, True)
+        outs[i,:] = output.data.cpu().numpy()
+        preds[i] = preds_i.cpu().numpy()
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
@@ -195,17 +238,17 @@ def validate(x, y, model, criterion, args):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+        if bix % args.print_freq == 0:
+            print('   Valid: [{0}/{1}]  '
+                  #'Time {batch_time.val:.3f} ({batch_time.avg:.3f})  '
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})  '
                   'Acc {accu.val:.3f} ({accu.avg:.3f})'.format(
-                   i, len(x), batch_time=batch_time, loss=losses,
+                   bix, (len(xnumpy)/batch_size), batch_time=batch_time, loss=losses,
                    accu=accuracies))
 
-    print(' * Acc {accu.avg:.3f}'.format(accu=accuracies))
-
-    return accuracies.avg
+    acc, auc, acc_list, auc_list = numpy_evaluate(xnumpy, preds, ynumpy, outs, ids, doplot, 'validation')
+    print('*   Valid acc:{0:.3f}, acc_C0:{2:.3f}, acc_C1:{4:.3f}, acc_C2:{6:.3f}'.format(acc, auc, acc_list[0], auc_list[0], acc_list[1], auc_list[1], acc_list[2], auc_list[2]))
+    return losses.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -213,7 +256,42 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
 
-
+def aggregate_score(x, pred, y, outs, ids, doplot=False, tag=''):
+    pass
+        
+def numpy_evaluate(x, pred, y, outs, ids, doplot=False, tag=''):
+    if doplot == True:
+        for ix in range(len(y)):
+            print('    ',ix, ids[ix], y[ix], pred[ix], outs[ix], '(', tag, ')' )
+    aggregate_score(x, pred, y, outs, ids, doplot=False, tag='')
+    prec_list = [0]*int(max(y)+1)
+    auc_list = [0]*int(max(y)+1)
+    random_subset = np.arange(len(y))
+    #np.random.shuffle(random_subset)
+    visualize=200
+    if doplot==True:
+        f, axarray = plt.subplots(20,10, figsize=(17,30))
+        for i in range(axarray.shape[0]):
+            for j in range(axarray.shape[1]):
+                ix_orig = random_subset[i*10+j]
+                axarray[i,j].imshow(x[ix_orig].reshape(256,256))
+                axarray[i,j].set_title('{0}/{1}:{2}'.format(y[ix_orig], pred[ix_orig], ids[ix_orig]), size=8)
+        plt.show()
+    for class_id in range(max(y)):
+        print('    ----------------------------------     ')
+        print('    |class =', class_id)
+        class_ix = (y == class_id)
+        class_pred_ix = (pred == class_id)
+        subset_pred = pred[class_ix]
+        print('    |total true pos:', class_ix.sum())
+        print('    |of those, model detected:', (subset_pred==class_id).sum())
+        print('    |total predicted pos:', class_pred_ix.sum())
+        print('    |recall:', (subset_pred==class_id).sum()/class_ix.sum())
+        print('    |precision:', (subset_pred==class_id).sum()/class_pred_ix.sum())
+        prec_list[class_id] = (subset_pred==class_id).sum()/class_pred_ix.sum()
+    print('    ----------------------------------     ')        
+    return metrics.accuracy_score(pred, y), 0, prec_list, auc_list
+        
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -250,8 +328,13 @@ def accuracy(output, target):
     res.append(correct_k.mul_(100.0 / batch_size))
     return res[0]
 
-def load_pickle(fname, isx=False, good_ix=0):
+def make_3_channel(raw):
+    return np.stack([raw, raw, raw], axis=1)
+    
+def load_pickle(fname, isx=False, good_ix=0, isIDs=False):
     raw = pickle.load(open(fname, 'rb'))
+    if isIDs == True:
+        return np.array(raw)[good_ix], -1
     if 'T1' in fname:
         threshold = 1.5
     if 'T2' in fname:
@@ -259,30 +342,33 @@ def load_pickle(fname, isx=False, good_ix=0):
     if 'GD' in fname:
         threshold = 2
     if isx:
-        print('X data is of range', raw.min(), raw.max(), ' and of shape:', raw.shape)
-        print('normalizing X')
+        print('=> X data is of range', raw.min(), raw.max(), ' and of shape:', raw.shape)
+        print('=> normalizing X')
     else:
-        print('Y data is of range', raw.min(), raw.max(), ' and of shape:', raw.shape)
-        print('Y class distribution is:', raw.sum(axis=0), ' of total', raw.shape)
-    if isx == True:
-        m1 = raw.mean(axis=1).ravel(); ix_m = (m1 < m1.mean() - threshold * m1.std()); print(ix_m.sum());
-        s1 = raw.std(axis=1).ravel(); ix_s = (s1 < s1.mean() - 2 * s1.std()); print(ix_s.sum());
-        both_ix = (ix_m & ix_s)
-        good_ix = (both_ix == False)
-        print('of total of', good_ix.shape, 'keeping:', good_ix.sum(), ' removing noisy captures')
-        raw = raw[good_ix, :]
-        mean1 = raw.mean(axis=1, keepdims=True)
-        std1 = raw.std(axis=1, keepdims=True)
-        raw = raw/255.0
-        #raw = (raw - mean1)/std1
-        raw = raw.reshape(raw.shape[0], 256, 256)
-        raw = np.stack([raw, raw, raw], axis=1)
+        print('=> Y data is of range', raw.min(), raw.max(), ' and of shape:', raw.shape)
+        print('=> Y class distribution is:', raw.sum(axis=0), ' of total', raw.shape)
+    
+    if isx == True:       
+        #m1 = raw.mean(axis=1).ravel(); ix_m = (m1 < m1.mean() - threshold * m1.std()); print(ix_m.sum());
+        #s1 = raw.std(axis=1).ravel(); ix_s = (s1 < s1.mean() - 2 * s1.std()); print(ix_s.sum());
+        #both_ix = (ix_m & ix_s)
+        #good_ix = (both_ix == False)
+        #print('of total of', good_ix.shape, 'keeping:', good_ix.sum())
+        #raw = raw[good_ix, :]        
+        rawnnz = (raw > raw.mean())
+        rawnnz = binary_fill_holes(rawnnz)
+        good_ix = (rawnnz.sum(axis=1) > (256*256/4)) & (rawnnz.sum(axis=1) < (256*256/2)) 
+        mean_all = raw[rawnnz].mean()
+        std_all = raw[rawnnz].std()
+        #raw = raw/255.0
+        raw = rawnnz * (raw - mean_all)/(std_all) # i.e. normalize nonzeros only
+        raw = raw.reshape(raw.shape[0], 1, 256, 256)
+        raw = raw[good_ix, :, :]
         return raw, good_ix
     else:
         raw = np.argmax(raw, axis=1)
         raw = raw[good_ix]
         return raw, -1
-    return tensor_out
 
 def get_args(argv):
     parser = argparse.ArgumentParser(description='PyTorch Convnet Training')
@@ -294,6 +380,8 @@ def get_args(argv):
                         help='path to dataset pickle file train y ')
     parser.add_argument('--valid_y_pkl',
                         help='path to dataset pickle file valid y')
+    parser.add_argument('--train_id_pkl', help='path to dataset pickle file train ID ')
+    parser.add_argument('--valid_id_pkl', help='path to dataset pickle file valid ID')
     parser.add_argument('--arch', '-a', metavar='ARCH', default='alexnet',
                         choices=model_names,
                         help='model architecture: ' +
@@ -315,12 +403,14 @@ def get_args(argv):
                         metavar='N', help='print frequency (default: 10)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
-    parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', default=False,
-                        help='evaluate model on validation set')
-    parser.add_argument('--pretrained', dest='pretrained', action='store_true', default=False,
-                        help='use pre-trained model')
-    parser.add_argument('--gpu_id', default='2', help='GPU id to be used')
-    parser.add_argument('--save_fname', default='./checkpoint.pth.tar', help='name of the checkpoint file')
+    parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', 
+                        default=False, help='evaluate model on validation set')
+    parser.add_argument('--pretrained', dest='pretrained', action='store_true'
+                        , default=False, help='use pre-trained model')
+    parser.add_argument('--gpu_id', default='2', 
+                        help='GPU id to be used')
+    parser.add_argument('--save_fname', default='./checkpoint.pth.tar',
+                        help='name of the checkpoint file')
     
     return parser.parse_args(argv)
 
