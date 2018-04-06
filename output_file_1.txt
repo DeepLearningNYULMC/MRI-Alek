@@ -1,0 +1,10 @@
+Validation loss at i = 0 is 37.1653
+Validation loss at i = 100 is 19.0693
+Validation loss at i = 200 is 12.9748
+Validation loss at i = 300 is 9.97729
+Validation loss at i = 400 is 8.22354
+Validation loss at i = 500 is 7.00372
+Validation loss at i = 600 is 6.10633
+Validation loss at i = 700 is 5.46253
+Validation loss at i = 800 is 4.94452
+Validation loss at i = 900 is 4.56785

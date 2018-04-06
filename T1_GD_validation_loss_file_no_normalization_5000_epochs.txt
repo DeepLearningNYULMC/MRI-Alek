@@ -1,0 +1,10 @@
+Validation loss at i = 0 is 6.5858
+ROCs at i = 0 are 0.472222222222, 0.972222222222, nan, 
+Validation loss at i = 1000 is 3.58321
+ROCs at i = 1000 are 0.583333333333, 0.666666666667, nan, 
+Validation loss at i = 2000 is 2.72224
+ROCs at i = 2000 are 0.611111111111, 0.611111111111, nan, 
+Validation loss at i = 3000 is 2.46501
+ROCs at i = 3000 are 0.583333333333, 0.583333333333, nan, 
+Validation loss at i = 4000 is 2.29257
+ROCs at i = 4000 are 0.638888888889, 0.638888888889, nan, 

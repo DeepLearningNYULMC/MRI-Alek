@@ -130,7 +130,8 @@ def main(_):
   validate_y2_nonaggregated = pickle.load(open( "T1_GD_all__validation_y_no_normalization.p", "rb" ))
   print("validate_y2 loaded.")
 
-
+  number_epochs = sys.argv[0]
+  kernal_size = sys.argv[2]
 
 
   data_set_all = DataSet(x2,y2, fake_data=False)
@@ -167,12 +168,12 @@ def main(_):
   total_loss = 0
   avg_validation_loss = 0
   total_validation_loss = 0
-  batch_size = 10
+  batch_size = sys.argv[1]
   batches_completed = 0
   validation_batches_completed = 0
   config = tf.ConfigProto(allow_soft_placement=True)
   config.gpu_options.allow_growth = True
-  output_file= open("T1_GD_validation_loss_file_no_normalization.txt","w+")
+  output_file= open("T1_GD_validation_loss_file_no_normalization_"+epoch_size+"_epochs_"+kernal_size+"_kernalsize_"+batch_size+"_batchsize.txt","w+")
   
   with tf.Session(config = config) as sess:
     
@@ -181,7 +182,7 @@ def main(_):
 
     # sess.graph.finalize()
 
-    for i in range(10000):
+    for i in range(5000):
       batch_x, batch_y = data_set_all.next_batch(batch_size)
       for batch_slice in batch_x:
         batch_slice = numpy.reshape(batch_slice, (256, 256))
